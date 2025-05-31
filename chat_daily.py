@@ -8,10 +8,12 @@ from langchain_core.documents import Document
 from datetime import datetime
 import re
 
+load_dotenv()
+openai.api_key = os.getenv("OPENAI_API_KEY")
 class RT_Daily_Chatbot:
-    def __init__(self, api_key):
-        self.prompt_path = "./RT_CHAT/prompt/daily_prompt_test3.txt"
-        self.client = openai.OpenAI(api_key=api_key)
+    def __init__(self):
+        self.prompt_path = "./prompt/daily_prompt_test3.txt"
+        self.client = openai.OpenAI(api_key=openai.api_key)
         self.chat_history = []
         self.db_manager = DiaryDBManager(persist_path="vectorstore/diary_faiss")
 
@@ -139,7 +141,7 @@ class RT_Daily_Chatbot:
 
             # 프롬프트 로딩 및 포맷팅
             prompt = self.load_prompt(
-                "./RT_CHAT/prompt/recall_prompt_test3.txt",
+                "./prompt/recall_prompt_test3.txt",
                 chat_history=self.get_chat_history_as_text(),
                 diary_content=combined_diary_content
             )
@@ -203,7 +205,7 @@ class RT_Daily_Chatbot:
     def generate_diary(self) -> Tuple[str, str]:
         summary_prompt = {
             "role": "system",
-            "content": self._load_prompt("./RT_CHAT/prompt/diary_gen_prompt.txt")
+            "content": self._load_prompt("./prompt/diary_gen_prompt.txt")
         }
 
         try:
@@ -238,7 +240,7 @@ class RT_Daily_Chatbot:
     # 일기 저장
     def save_diary(self, title: str, body: str):
         today = datetime.now().strftime("%Y-%m-%d")
-        save_dir = "./RT_CHAT/diary/daily_diaries"
+        save_dir = "./diary/daily_diaries"
         os.makedirs(save_dir, exist_ok=True)
 
         # 제목을 파일명으로 사용하되, 파일명에 적합하도록 정리
@@ -262,11 +264,8 @@ class RT_Daily_Chatbot:
 
 if __name__ == "__main__":
     
-    _ = load_dotenv(find_dotenv())
 
-    openai.api_key  = os.getenv("OPENAI_API_KEY")
-
-    daily_bot = RT_Daily_Chatbot(openai.api_key)
+    daily_bot = RT_Daily_Chatbot()
 
      # 💬 챗봇이 먼저 질문
     print("🤖 챗봇:", daily_bot.start_conversation())

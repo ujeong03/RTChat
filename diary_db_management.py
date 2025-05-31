@@ -71,7 +71,18 @@ class DiaryDBManager:
 
        
         return final_docs
-
+    
+    def search_all_diaries(self):
+        """
+        FAISS 벡터스토어에 저장된 모든 일기 문서를 반환합니다.
+        """
+        try:
+            # FAISS에서는 빈 쿼리로도 유사도 검색 가능.
+            # 모든 문서를 가져오기 위해 큰 k 설정 (예: 1000)
+            return self.vectordb.similarity_search(query="", k=1000)
+        except Exception as e:
+            print(f"[ERROR] search_all_diaries 실패: {e}")
+            return []
 
     
     def get_diary_7days_by_date(self, date: str) -> list[Document]:
