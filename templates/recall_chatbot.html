@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>회상 세션</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f4f4f9; margin: 0; }
+    .container { max-width: 600px; margin: 40px auto; background: #fff; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); padding: 20px; }
+    h1 { text-align: center; color: #333; }
+    .chat-box { border: 1px solid #ddd; border-radius: 8px; padding: 10px; height: 320px; overflow-y: auto; background: #f9f9f9; }
+    .chat-box p { margin: 5px 0; }
+    .user { color: #007bff; }
+    .assistant { color: #28a745; }
+    .input-box { display: flex; margin-top: 10px; }
+    .input-box input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
+    .input-box button { padding: 10px; background: #007bff; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+    .input-box button:hover { background: #0056b3; }
+    .start-session { text-align: center; margin-bottom: 20px; }
+    .start-session button { padding: 10px 20px; background: #28a745; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+    .start-session button:hover { background: #218838; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>회상 세션</h1>
+    <div class="start-session">
+      <button onclick="startRecallSession()">회상 세션 시작</button>
+    </div>
+    <div class="chat-box" id="chat-box"></div>
+    <div class="input-box">
+      <input type="text" id="user-input" placeholder="질문에 답변하세요...">
+      <button onclick="sendAnswer()">답변 제출</button>
+    </div>
+  </div>
+  <script>
+    async function startRecallSession() {
+      const chatBox = document.getElementById("chat-box");
+      chatBox.innerHTML = ""; // 기존 대화 초기화
+
+      try {
+        const response = await fetch("/recall-session/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: "test_user", // 테스트용 user_id
+            date: new Date().toISOString().split("T")[0] // 오늘 날짜
+          })
+        });
+        const data = await response.json();
+
+        if (data.error) {
+          const errorMessage = document.createElement("p");
+          errorMessage.className = "assistant";
+          errorMessage.textContent = `❌ 오류: ${data.error}`;
+          chatBox.appendChild(errorMessage);
+        } else {
+          const assistantMessage = document.createElement("p");
+          assistantMessage.className = "assistant";
+          assistantMessage.innerHTML = `🧩 질문 유형: ${data.current_question.type}<br>🤖 질문: ${data.current_question.question}`;
+          chatBox.appendChild(assistantMessage);
+        }
+      } catch (error) {
+        const errorMessage = document.createElement("p");
+        errorMessage.className = "assistant";
+        errorMessage.textContent = "❌ 서버와 연결할 수 없습니다. 다시 시도해주세요.";
+        chatBox.appendChild(errorMessage);
+      }
+    }
+
+    async function sendAnswer() {
+      const userInput = document.getElementById("user-input").value;
+      const chatBox = document.getElementById("chat-box");
+      if (!userInput.trim()) return; // 입력값이 없으면 아무 작업도 하지 않음
+
+      // 사용자 입력 표시
+      const userMessage = document.createElement("p");
+      userMessage.className = "user";
+      userMessage.textContent = `🙋 사용자: ${userInput}`;
+      chatBox.appendChild(userMessage);
+      document.getElementById("user-input").value = ""; // 입력창 초기화
+
+      try {
+        const response = await fetch("/recall-session/answer", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_answer: userInput }) // 서버로 사용자 답변 전달
+        });
+        const data = await response.json();
+
+        if (data.error) {
+          const errorMessage = document.createElement("p");
+          errorMessage.className = "assistant";
+          errorMessage.textContent = `❌ 오류: ${data.error}`;
+          chatBox.appendChild(errorMessage);
+        } else {
+          const assistantMessage = document.createElement("p");
+          assistantMessage.className = "assistant";
+          assistantMessage.innerHTML = `🤖 피드백: ${data.feedback}<br>📊 점수: ${data.score}`;
+          chatBox.appendChild(assistantMessage);
+
+          if (data.next_question) {
+            const nextQuestion = document.createElement("p");
+            nextQuestion.className = "assistant";
+            nextQuestion.innerHTML = `🧩 질문 유형: ${data.next_question.type}<br>🤖 질문: ${data.next_question.question}`;
+            chatBox.appendChild(nextQuestion);
+          } else {
+            const endMessage = document.createElement("p");
+            endMessage.className = "assistant";
+            endMessage.textContent = "✅ 모든 질문이 완료되었습니다!";
+            chatBox.appendChild(endMessage);
+          }
+        }
+      } catch (error) {
+        const errorMessage = document.createElement("p");
+        errorMessage.className = "assistant";
+        errorMessage.textContent = "❌ 서버와 연결할 수 없습니다. 다시 시도해주세요.";
+        chatBox.appendChild(errorMessage);
+      }
+    }
+</script>
+</body>
+</html>

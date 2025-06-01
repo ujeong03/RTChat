@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>테마 챗봇</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f4f4f9; margin: 0; }
+    .container { max-width: 600px; margin: 40px auto; background: #fff; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); padding: 20px; }
+    h1 { text-align: center; color: #333; }
+    .chat-box { border: 1px solid #ddd; border-radius: 8px; padding: 10px; margin-top: 20px; height: 300px; overflow-y: auto; background: #f9f9f9; }
+    .input-box { display: flex; margin-top: 20px; }
+    .input-box input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
+    .input-box button { padding: 10px; border: none; background: #007BFF; color: #fff; border-radius: 4px; cursor: pointer; }
+    .input-box button:hover { background: #0056b3; }
+    .user { color: #007BFF; margin: 5px 0; }
+    .assistant { color: #333; margin: 5px 0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>테마 챗봇</h1>
+    <div id="chat-box" class="chat-box"></div>
+    <div class="input-box">
+      <input type="text" id="user-input" placeholder="메시지를 입력하세요...">
+      <button onclick="sendMessage()">전송</button>
+    </div>
+  </div>
+  <script>
+    async function startThemeConversation() {
+      const chatBox = document.getElementById("chat-box");
+      chatBox.innerHTML = ""; // 기존 대화 초기화
+
+      try {
+        const response = await fetch("/theme/start", { method: "GET" });
+        const data = await response.json();
+
+        if (data.error) {
+          const errorMessage = document.createElement("p");
+          errorMessage.className = "assistant";
+          errorMessage.textContent = `❌ 오류: ${data.error}`;
+          chatBox.appendChild(errorMessage);
+        } else {
+          const assistantMessage = document.createElement("p");
+          assistantMessage.className = "assistant";
+          assistantMessage.textContent = `🤖 ${data.response}`;
+          chatBox.appendChild(assistantMessage);
+        }
+      } catch (error) {
+        const errorMessage = document.createElement("p");
+        errorMessage.className = "assistant";
+        errorMessage.textContent = "❌ 서버와 연결할 수 없습니다. 다시 시도해주세요.";
+        chatBox.appendChild(errorMessage);
+      }
+    }
+
+    async function sendMessage() {
+      const userInput = document.getElementById("user-input").value;
+      const chatBox = document.getElementById("chat-box");
+      if (!userInput.trim()) return; // 입력값이 없으면 아무 작업도 하지 않음
+
+      // 사용자 입력 표시
+      const userMessage = document.createElement("p");
+      userMessage.className = "user";
+      userMessage.textContent = `🙋 사용자: ${userInput}`;
+      chatBox.appendChild(userMessage);
+      document.getElementById("user-input").value = ""; // 입력창 초기화
+
+      try {
+        const response = await fetch("/theme/ask", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: userInput })
+        });
+        const data = await response.json();
+
+        if (data.error) {
+          const errorMessage = document.createElement("p");
+          errorMessage.className = "assistant";
+          errorMessage.textContent = `❌ 오류: ${data.error}`;
+          chatBox.appendChild(errorMessage);
+        } else {
+          const assistantMessage = document.createElement("p");
+          assistantMessage.className = "assistant";
+          assistantMessage.textContent = `🤖 ${data.response}`;
+          chatBox.appendChild(assistantMessage);
+        }
+      } catch (error) {
+        const errorMessage = document.createElement("p");
+        errorMessage.className = "assistant";
+        errorMessage.textContent = "❌ 서버와 연결할 수 없습니다. 다시 시도해주세요.";
+        chatBox.appendChild(errorMessage);
+      }
+    }
+
+    // 테마 대화 시작
+    startThemeConversation();
+  </script>
+</body>
+</html>

@@ -28,9 +28,9 @@ class RT_Theme_Chatbot:
         """챗봇 상태 초기화"""
         self.history = []
         
-    def select_theme(self) -> str:
+    def select_theme(self, user_id: str) -> str:
         try:
-            docs = self.db_manager.search_all_diaries()
+            docs = self.db_manager.search_all_diaries(user_id)
             themes = []
             for doc in docs:
                 theme = doc.metadata.get("theme")
@@ -61,8 +61,6 @@ class RT_Theme_Chatbot:
                 # fallback 처리
                 selected_theme_num = None
             selected_theme_num = response.choices[0].message.content.strip()
-            print(f"🔍 입력 프롬프트: {prompt}")
-            print(f"🔍 선택된 테마 번호: {selected_theme_num}")
 
             return selected_theme_num
 
@@ -81,7 +79,7 @@ class RT_Theme_Chatbot:
             theme_name = theme_list[int(selected_theme_num)-1]
 
             prompt = self.load_prompt(
-                f"./prompt/theme_prompt_{selected_theme_num}_{theme_name}.txt",
+                f"./prompt/theme_prompt_{selected_theme_num}_{theme_name}_test.txt",
             )
             response = self.client.chat.completions.create(
                 model="gpt-4.1-mini" 
@@ -99,9 +97,9 @@ class RT_Theme_Chatbot:
             print(f"❗테마 변경 실패: {e}")
             return "테마 변경에 실패했습니다. 다시 시도해 주세요."
         
-    def start_conversation(self) -> str:
+    def start_conversation(self,user_id:str) -> str:
         try:
-            selected_theme_num = self.select_theme()
+            selected_theme_num = self.select_theme(user_id)
             selected_theme_bot = self.change_theme(selected_theme_num)
             self.chat_history.append({"role": "assistant", "content": selected_theme_bot})
             return selected_theme_bot
@@ -110,7 +108,7 @@ class RT_Theme_Chatbot:
             return "대화를 시작하는 데 문제가 발생했습니다. 다시 시도해 주세요."
 
     
-    def ask(self, user_input: str) -> str:
+    def ask(self, user_input: str, user_id: str) -> str:
         self.chat_history.append({"role": "user", "content": user_input})
 
         # ✅ 대화 종료 여부 판단 후 일기 저장
@@ -122,15 +120,8 @@ class RT_Theme_Chatbot:
             self.chat_history.append({"role": "assistant", "content": farewell})
 
             diary_title, diary_theme, diary_body = self.generate_diary()
-            self.save_diary(diary_title,diary_body,diary_theme)
-            self.db_manager.create_or_update_index(
-                [diary_body],
-                [{
-                    "date": datetime.now().strftime("%Y-%m-%d"),
-                    "title": diary_title  # ⬅️ 여기 추가됨
-                    ,"theme" : diary_theme
-                }]
-            )
+            self.save_diary(diary_title,diary_body,diary_theme,user_id)
+    
             return farewell + "\n\n(일기가 저장되었어요. 프로그램을 종료합니다.)"
 
 
@@ -140,7 +131,7 @@ class RT_Theme_Chatbot:
         # 키워드 통합 검색
         query = self.gpt_build_query(keywords)
 
-        results = self.db_manager.search(keywords,query)
+        results = self.db_manager.search(user_id,keywords,query)
 
         recalled_diaries = []
         for i, doc in enumerate(results):
@@ -252,29 +243,38 @@ class RT_Theme_Chatbot:
     # 사용자가 대화를 종료하려는 의도 확인하기
     def is_conversation_ending(self) -> bool:
         try:
-            messages = [
-                {"role": "system", "content": "사용자의 마지막 발화가 대화를 끝내려는 의도인지 판단해 주세요. 반드시 '예' 또는 '아니오'로만 대답해 주세요."},
-                {"role": "user", "content": "고마워, 다음에 또 이야기할게."},
-                {"role": "assistant", "content": "예"},
-                {"role": "user", "content": "그래"},
-                {"role": "assistant", "content": "예"},
-                {"role": "user", "content": "오늘은 여기까지 할게."},
-                {"role": "assistant", "content": "예"},
-                {"role": "user", "content": "안녕히 계세요."},
-                {"role": "assistant", "content": "예"},
-                {"role": "user", "content": "잠깐만, 그 얘기 다시 해줘"},
-                {"role": "assistant", "content": "아니오"},
-                {"role": "user", "content": self.chat_history[-1]["content"]}
-            ]
+            # 대화 히스토리가 너무 짧은 경우, 종료로 간주하지 않음
+            if len(self.chat_history) <= 2:
+                return False
 
+            # 최근 대화 6개만 사용
+            recent_history = self.chat_history[-6:]
+
+            # 시스템 지시 및 히스토리 포함 메시지 구성
+            messages = [
+                {"role": "system", "content": (
+                    "다음은 사용자와 챗봇 사이의 최근 대화입니다.\n"
+                    "이 대화의 마지막 사용자 발화가 대화를 끝내려는 의도인지 판단해 주세요.\n"
+                    "반드시 '예' 또는 '아니오'로만 대답해 주세요.\n"
+                    "대화 시작 인사('안녕', '하이', '안녕하세요') 등은 종료가 아닙니다.\n"
+                )}
+            ]
+            messages.extend(recent_history)
+            messages.append({
+                "role": "system",
+                "content": "위 대화에서 마지막 사용자의 발화는 대화를 끝내려는 의도입니까? 반드시 '예' 또는 '아니오'로만 대답하세요."
+            })
+
+            # GPT 모델 호출
             response = self.client.chat.completions.create(
-                model="gpt-4.1-mini",
+                model="gpt-4.1-mini",  # 또는 "gpt-3.5-turbo", "gpt-4" 등
                 messages=messages,
                 temperature=0.0,
                 max_tokens=5
             )
             answer = response.choices[0].message.content.strip().lower()
             return "예" in answer
+
         except Exception as e:
             print(f"[❗대화 종료 판단 실패] {e}")
             return False
@@ -317,7 +317,7 @@ class RT_Theme_Chatbot:
         return sanitized[:100]
 
     # 일기 저장
-    def save_diary(self, title: str, body: str, theme:str):
+    def save_diary(self, title: str, body: str, theme:str,user_id: str):
         today = datetime.now().strftime("%Y-%m-%d")
         save_dir = "./diary/theme_diaries"
         os.makedirs(save_dir, exist_ok=True)
@@ -332,29 +332,39 @@ class RT_Theme_Chatbot:
 
         # 벡터 DB 업데이트
         self.db_manager.create_or_update_index(
+            user_id=user_id,  # 유저 ID 추가
             diary_texts=[body],
             metadata_list=[{
                 "date": today,
                 "title": title,
-                "theme" : theme
+                "theme" : theme                            
             }]
         )
 
 
 if __name__ == "__main__":
+    # 로컬 테스트용 user_id 생성
+    user_id = "test_user"
 
-
+    # RT_Theme_Chatbot 인스턴스 생성
     theme_bot = RT_Theme_Chatbot()
 
-     # 💬 챗봇이 먼저 질문
-    print("🤖 챗봇:", theme_bot.start_conversation())
+    # 💬 챗봇이 먼저 질문
+    print("🤖 챗봇:", theme_bot.start_conversation(user_id))
 
     while True:
+        # 사용자 입력 받기
         msg = input("🙋 사용자: ")
-        
-        reply = theme_bot.ask(msg)  # ✅ 한 번만 호출!
-        print("🤖 챗봇:", reply)
-        print("----- 디버깅용")
 
-        if "프로그램을 종료합니다" in reply:
+        # 대화 종료 조건 확인
+        if msg.lower() in ["종료", "exit", "quit"]:
+            print("프로그램을 종료합니다.")
             break
+
+        # 챗봇 응답 생성
+        reply = theme_bot.ask(msg, user_id=user_id)  # user_id 전달
+        print("🤖 챗봇:", reply)
+
+        # 디버깅용 출력
+        print("----- 디버깅용 -----")
+        print(f"현재 대화 기록: {theme_bot.chat_history}")
