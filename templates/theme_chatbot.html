@@ -26,12 +26,48 @@
     </div>
   </div>
   <script>
+    let jwtToken = null; // JWT 토큰을 저장할 변수
+
+    // 페이지 로드 시 자동으로 /auth/token 호출
+    window.onload = async function() {
+      try {
+        const response = await fetch("/auth/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_id: "test_user" }) // 테스트용 user_id
+        });
+        const data = await response.json();
+        if (data.token) {
+          jwtToken = data.token; // 토큰 저장
+          console.log("JWT 토큰 생성 완료:", jwtToken);
+          startThemeConversation(); // 토큰 생성 후 테마 대화 시작
+        } else {
+          console.error("토큰 생성 실패:", data.error);
+        }
+      } catch (error) {
+        console.error("서버와 연결할 수 없습니다:", error);
+      }
+    };
+
     async function startThemeConversation() {
       const chatBox = document.getElementById("chat-box");
       chatBox.innerHTML = ""; // 기존 대화 초기화
 
+      if (!jwtToken) {
+        const errorMessage = document.createElement("p");
+        errorMessage.className = "assistant";
+        errorMessage.textContent = "❌ JWT 토큰이 없습니다. 페이지를 새로고침하세요.";
+        chatBox.appendChild(errorMessage);
+        return;
+      }
+
       try {
-        const response = await fetch("/theme/start", { method: "GET" });
+        const response = await fetch("/theme/start", {
+          method: "GET",
+          headers: {
+            "Authorization": `Bearer ${jwtToken}` // JWT 토큰 포함
+          }
+        });
         const data = await response.json();
 
         if (data.error) {
@@ -58,6 +94,14 @@
       const chatBox = document.getElementById("chat-box");
       if (!userInput.trim()) return; // 입력값이 없으면 아무 작업도 하지 않음
 
+      if (!jwtToken) {
+        const errorMessage = document.createElement("p");
+        errorMessage.className = "assistant";
+        errorMessage.textContent = "❌ JWT 토큰이 없습니다. 페이지를 새로고침하세요.";
+        chatBox.appendChild(errorMessage);
+        return;
+      }
+
       // 사용자 입력 표시
       const userMessage = document.createElement("p");
       userMessage.className = "user";
@@ -68,7 +112,10 @@
       try {
         const response = await fetch("/theme/ask", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${jwtToken}` // JWT 토큰 포함
+          },
           body: JSON.stringify({ message: userInput })
         });
         const data = await response.json();
@@ -91,9 +138,6 @@
         chatBox.appendChild(errorMessage);
       }
     }
-
-    // 테마 대화 시작
-    startThemeConversation();
   </script>
 </body>
 </html>

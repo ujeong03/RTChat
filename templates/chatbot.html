@@ -1,4 +1,3 @@
-<!-- templates/chatbot.html -->
 <!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -51,6 +50,28 @@
     <audio id="tts-audio" controls style="display:none;"></audio>
 
     <script>
+        let jwtToken = null; // JWT 토큰을 저장할 변수
+
+        // 페이지 로드 시 자동으로 /auth/token 호출
+        window.onload = async function() {
+            try {
+                const response = await fetch("/auth/token", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ user_id: "test_user" }) // 테스트용 user_id
+                });
+                const data = await response.json();
+                if (data.token) {
+                    jwtToken = data.token; // 토큰 저장
+                    console.log("JWT 토큰 생성 완료:", jwtToken);
+                } else {
+                    console.error("토큰 생성 실패:", data.error);
+                }
+            } catch (error) {
+                console.error("서버와 연결할 수 없습니다:", error);
+            }
+        };
+
         function appendMessage(text, sender) {
             const chatBox = document.getElementById("chat-box");
             const line = document.createElement("div");
@@ -61,7 +82,17 @@
         }
 
         async function startConversation() {
-            const res = await fetch("/start");
+            if (!jwtToken) {
+                console.error("JWT 토큰이 없습니다. 페이지를 새로고침하세요.");
+                return;
+            }
+
+            const res = await fetch("/start", {
+                method: "GET",
+                headers: {
+                    "Authorization": `Bearer ${jwtToken}` // JWT 토큰 포함
+                }
+            });
             const data = await res.json();
             appendMessage(data.response, "bot");
             playTTS(data.response);
@@ -78,7 +109,8 @@
             const res = await fetch("/ask", {
                 method: "POST",
                 headers: {
-                    "Content-Type": "application/json"
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${jwtToken}` // JWT 토큰 포함
                 },
                 body: JSON.stringify({ message: message })
             });
@@ -94,7 +126,8 @@
             const res = await fetch("/tts", {
                 method: "POST",
                 headers: {
-                    "Content-Type": "application/json"
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${jwtToken}` // JWT 토큰 포함
                 },
                 body: JSON.stringify({ text: text })
             });

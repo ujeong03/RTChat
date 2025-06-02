@@ -1,12 +1,13 @@
 import openai
 from datetime import datetime
 import os
-from dotenv import load_dotenv, find_dotenv
+from dotenv import load_dotenv
 from diary_db_management import DiaryDBManager
 from typing import List, Tuple
 from langchain_core.documents import Document
 from datetime import datetime
 import re
+import requests
 
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -16,6 +17,20 @@ class RT_Daily_Chatbot:
         self.client = openai.OpenAI(api_key=openai.api_key)
         self.chat_history = []
         self.db_manager = DiaryDBManager(persist_path="vectorstore/diary_faiss")
+
+    def _fetch_user_profile(self, user_id: str) -> dict:
+        """
+        Django API (https://nabiya.site/api/users/get_user_info/?user_id=…)
+        엔드포인트를 호출해서 JSON 응답을 dict로 반환합니다.
+        """
+        try:
+            url = f"https://nabiya.site/api/users/get_user_info/?user_id={user_id}"
+            resp = requests.get(url, timeout=5)
+            resp.raise_for_status()
+            return resp.json()  # e.g. {"user_id":"1","name":"김철수","gender":"남성", ...}
+        except Exception as e:
+            print(f"[프로필 조회 실패] user_id={user_id} / error={e}")
+            return {}
 
     def _load_prompt(self, path: str) -> str:
         with open(path, "r", encoding="utf-8") as f:
@@ -241,18 +256,11 @@ class RT_Daily_Chatbot:
 
 
     # 일기 저장
-    def save_diary(self, title: str, body: str,user_id: str):
+    def save_diary(self, title: str, body: str, user_id: str) -> dict:
+        """
+        일기 내용을 JSON 형식으로 반환합니다.
+        """
         today = datetime.now().strftime("%Y-%m-%d")
-        save_dir = "./diary/daily_diaries"
-        os.makedirs(save_dir, exist_ok=True)
-
-        # 제목을 파일명으로 사용하되, 파일명에 적합하도록 정리
-        safe_title = self.sanitize_filename(title)
-        file_name = f"diary_{today}_{safe_title}.txt"
-        file_path = os.path.join(save_dir, file_name)
-
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(f"제목: {title}\n\n{body}")
 
         # 벡터 DB 업데이트
         self.db_manager.create_or_update_index(
@@ -261,9 +269,16 @@ class RT_Daily_Chatbot:
             metadata_list=[{
                 "date": today,
                 "title": title,
-                "daily_diary" : "daily_diary"
+                "daily_diary": "daily_diary"
             }]
         )
+
+        # JSON 형식으로 반환
+        return {
+            "date": today,
+            "title": title,
+            "body": body
+        }
 
 
 if __name__ == "__main__":

@@ -79,7 +79,7 @@ class RT_Theme_Chatbot:
             theme_name = theme_list[int(selected_theme_num)-1]
 
             prompt = self.load_prompt(
-                f"./prompt/theme_prompt_{selected_theme_num}_{theme_name}_test.txt",
+                f"./prompt/theme_prompt_{selected_theme_num}_{theme_name}.txt",
             )
             response = self.client.chat.completions.create(
                 model="gpt-4.1-mini" 

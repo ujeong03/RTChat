@@ -102,7 +102,6 @@ class RT_ChatRecallSession:
             
     def run_session(self, diary_content: str, user_id: str):
         qnas = self.generate_recall_questions(user_id)
-        print(f'생성된 질문: {qnas}')
 
         for idx, recall_type in enumerate(["시간 지남력", "장소 지남력", "기억력"]):
             qa = qnas[idx]

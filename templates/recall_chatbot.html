@@ -33,16 +33,51 @@
     </div>
   </div>
   <script>
+    let jwtToken = null; // JWT 토큰을 저장할 변수
+    let questions = []; // 서버에서 받은 질문 배열
+    let questionIndex = 0; // 현재 질문 인덱스
+    let diaryContent = ""; // 서버에서 받은 일기 내용
+
+    // 페이지 로드 시 자동으로 /auth/token 호출
+    window.onload = async function() {
+      try {
+        const response = await fetch("/auth/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_id: "test_user" }) // 테스트용 user_id
+        });
+        const data = await response.json();
+        if (data.token) {
+          jwtToken = data.token; // 토큰 저장
+          console.log("JWT 토큰 생성 완료:", jwtToken);
+        } else {
+          console.error("토큰 생성 실패:", data.error);
+        }
+      } catch (error) {
+        console.error("서버와 연결할 수 없습니다:", error);
+      }
+    };
+
     async function startRecallSession() {
       const chatBox = document.getElementById("chat-box");
       chatBox.innerHTML = ""; // 기존 대화 초기화
 
+      if (!jwtToken) {
+        const errorMessage = document.createElement("p");
+        errorMessage.className = "assistant";
+        errorMessage.textContent = "❌ JWT 토큰이 없습니다. 페이지를 새로고침하세요.";
+        chatBox.appendChild(errorMessage);
+        return;
+      }
+
       try {
         const response = await fetch("/recall-session/start", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${jwtToken}` // JWT 토큰 포함
+          },
           body: JSON.stringify({
-            user_id: "test_user", // 테스트용 user_id
             date: new Date().toISOString().split("T")[0] // 오늘 날짜
           })
         });
@@ -54,9 +89,13 @@
           errorMessage.textContent = `❌ 오류: ${data.error}`;
           chatBox.appendChild(errorMessage);
         } else {
+          questions = data.questions; // 질문 배열 저장
+          diaryContent = data.diary_content; // 일기 내용 저장
+          questionIndex = 0; // 질문 인덱스 초기화
+
           const assistantMessage = document.createElement("p");
           assistantMessage.className = "assistant";
-          assistantMessage.innerHTML = `🧩 질문 유형: ${data.current_question.type}<br>🤖 질문: ${data.current_question.question}`;
+          assistantMessage.innerHTML = `🧩 질문 유형: ${questions[questionIndex].type}<br>🤖 질문: ${questions[questionIndex].question}`;
           chatBox.appendChild(assistantMessage);
         }
       } catch (error) {
@@ -72,6 +111,14 @@
       const chatBox = document.getElementById("chat-box");
       if (!userInput.trim()) return; // 입력값이 없으면 아무 작업도 하지 않음
 
+      if (!jwtToken) {
+        const errorMessage = document.createElement("p");
+        errorMessage.className = "assistant";
+        errorMessage.textContent = "❌ JWT 토큰이 없습니다. 페이지를 새로고침하세요.";
+        chatBox.appendChild(errorMessage);
+        return;
+      }
+
       // 사용자 입력 표시
       const userMessage = document.createElement("p");
       userMessage.className = "user";
@@ -82,8 +129,16 @@
       try {
         const response = await fetch("/recall-session/answer", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_answer: userInput }) // 서버로 사용자 답변 전달
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${jwtToken}` // JWT 토큰 포함
+          },
+          body: JSON.stringify({
+            user_answer: userInput,
+            question_index: questionIndex,
+            questions: questions,
+            diary_content: diaryContent
+          })
         });
         const data = await response.json();
 
@@ -99,6 +154,7 @@
           chatBox.appendChild(assistantMessage);
 
           if (data.next_question) {
+            questionIndex++; // 다음 질문으로 이동
             const nextQuestion = document.createElement("p");
             nextQuestion.className = "assistant";
             nextQuestion.innerHTML = `🧩 질문 유형: ${data.next_question.type}<br>🤖 질문: ${data.next_question.question}`;
@@ -117,6 +173,6 @@
         chatBox.appendChild(errorMessage);
       }
     }
-</script>
+  </script>
 </body>
 </html>

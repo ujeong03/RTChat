@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template, session
+from flask import Flask, request, jsonify, render_template
 from chat_daily import RT_Daily_Chatbot
 from chat_reall_sess import RT_ChatRecallSession
 from chat_theme import RT_Theme_Chatbot
@@ -7,14 +7,67 @@ from google.cloud import texttospeech, speech
 import os
 import openai
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from flask_cors import CORS
+import jwt
 
 # 환경 변수 로드
 _ = load_dotenv(find_dotenv())
 openai.api_key = os.getenv("OPENAI_API_KEY")
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 
+# JWT 설정
+JWT_SECRET = os.getenv("JWT_SECRET_KEY", "your_jwt_secret_key")  # 환경 변수에서 로드하거나 기본값 설정
+JWT_ALGORITHM = "HS256"
+JWT_EXP_DELTA_SECONDS = 3600  # 토큰 유효 시간 (1시간)
+
+def generate_jwt(user_id):
+    """
+    JWT 토큰 생성 함수
+    :param user_id: 사용자 ID
+    :return: JWT 토큰
+    """
+    # 현재 UTC 시간 계산
+    current_time = datetime.now(timezone.utc)
+    
+    # 토큰에 포함될 페이로드 정의
+    payload = {
+        "user_id": user_id,  # 사용자 ID
+        "iat": current_time,  # 토큰 생성 시간
+        "exp": current_time + timedelta(seconds=JWT_EXP_DELTA_SECONDS)  # 토큰 만료 시간
+    }
+    # JWT 토큰 생성
+    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return token
+
+def get_jwt_payload():
+    """
+    Authorization 헤더에서 JWT 토큰을 추출하고 검증하여 페이로드 반환
+    """
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return None, jsonify({"error": "Authorization token is required"}), 401
+
+    token = auth_header.split(" ")[1]  # 'Bearer <token>'에서 <token>만 추출
+    payload = verify_jwt(token)
+    if not payload:
+        return None, jsonify({"error": "Invalid or expired token"}), 401
+
+    return payload, None, None
+
+def verify_jwt(token):
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        return payload
+    except jwt.ExpiredSignatureError:
+        return None  # 토큰이 만료됨
+    except jwt.InvalidTokenError:
+        return None  # 토큰이 유효하지 않음
+    
+
+
 app = Flask(__name__)
+CORS(app, supports_credentials=True)
 app.secret_key = "1234567890abcdef"
 
 # 챗봇 객체
@@ -26,30 +79,54 @@ theme_bot = RT_Theme_Chatbot()
 tts_client = texttospeech.TextToSpeechClient()
 stt_client = speech.SpeechClient()
 
+@app.route("/auth/token", methods=["POST"])
+def get_token():
+    user_id = request.json.get("user_id")
+    if not user_id:
+        return jsonify({"error": "user_id is required"}), 400
+
+    token = generate_jwt(user_id)
+    return jsonify({"token": token})
+
+
 @app.route("/")
 def index():
     return render_template("chatbot.html")
 
 @app.route("/start", methods=["GET"])
 def start_conversation():
-    user_id = request.args.get("user_id", str(uuid.uuid4()))
-    session["user_id"] = user_id
+    payload, error_response, status_code = get_jwt_payload()
+    if error_response:
+        return error_response, status_code
+
+    user_id = payload["user_id"]
+
     daily_bot.reset()
     first_message = daily_bot.start_conversation()
     return jsonify({"response": first_message})
 
 @app.route("/ask", methods=["POST"])
 def ask():
+    payload, error_response, status_code = get_jwt_payload()
+    if error_response:
+        return error_response, status_code
+
+    user_id = payload["user_id"]
     user_input = request.json.get("message", "")
-    user_id = session.get("user_id")
-    if not user_input or not user_id:
-        return jsonify({"error": "Invalid input or session"}), 400
+    if not user_input:
+        return jsonify({"error": "message is required"}), 400
 
     reply = daily_bot.ask(user_input, user_id=user_id)
     return jsonify({"response": reply})
 
+# tts
 @app.route("/tts", methods=["POST"])
 def generate_tts():
+    payload, error_response, status_code = get_jwt_payload()
+    if error_response:
+        return error_response, status_code
+
+    user_id = payload["user_id"]
     text = request.json.get("text", "")
     if not text:
         return jsonify({"error": "text is required"}), 400
@@ -67,10 +144,35 @@ def generate_tts():
     with open(filename, "wb") as out:
         out.write(response.audio_content)
 
-    return jsonify({"audio_url": "/" + filename})
+    return jsonify({"audio_url": "/" + filename, "filename": filename})
 
+# tts 재생 후 삭제
+@app.route("/tts/delete", methods=["POST"])
+def delete_tts():
+    payload, error_response, status_code = get_jwt_payload()
+    if error_response:
+        return error_response, status_code
+
+    user_id = payload["user_id"]
+    filename = request.json.get("filename", "")
+    if not filename:
+        return jsonify({"error": "filename is required"}), 400
+
+    try:
+        os.remove(filename)
+        return jsonify({"message": "File deleted successfully"})
+    except FileNotFoundError:
+        return jsonify({"error": "File not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
 @app.route("/stt", methods=["POST"])
 def stt():
+    payload, error_response, status_code = get_jwt_payload()
+    if error_response:
+        return error_response, status_code
+
+    user_id = payload["user_id"]
     file = request.files["file"]
     audio = file.read()
     config = speech.RecognitionConfig(
@@ -84,6 +186,7 @@ def stt():
         return jsonify({"transcript": transcript})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    
 
 @app.route("/recall-session/test", methods=["GET"])
 def recall_test_page():
@@ -91,64 +194,57 @@ def recall_test_page():
 
 @app.route("/recall-session/start", methods=["POST"])
 def start_recall_session():
-    user_id = request.json.get("user_id")
+    payload, error_response, status_code = get_jwt_payload()
+    if error_response:
+        return error_response, status_code
+
+    user_id = payload["user_id"]
     date = request.json.get("date", datetime.today().strftime("%Y-%m-%d"))
 
-    if not user_id:
-        return jsonify({"error": "user_id is required"}), 400
-
     try:
-        # 일기 내용 가져오기
         diary_content = recall_session.get_diary_content(date, user_id)
         if not diary_content:
             return jsonify({"error": f"No diary content found for date: {date}"}), 404
 
-        # Document 객체를 JSON 직렬화 가능한 형태로 변환
         diary_content_serializable = [
             {"page_content": doc.page_content, "metadata": doc.metadata}
             for doc in diary_content
         ]
 
-        # 질문 생성
         qnas = recall_session.generate_recall_questions(user_id)
-        print("Generated QnAs:", qnas)  # 디버깅 로그 추가
-
         if not qnas:
             return jsonify({"error": "Failed to generate recall questions"}), 500
 
-        # 질문 유형 추가
         question_types = ["시간 지남력", "장소 지남력", "기억력"]
         questions_with_types = [
-    {
-        "type": question_types[idx],
-        "question": qa["질문"],
-        "answer": qa["답변"]
-    }
-    for idx, qa in enumerate(qnas)
-]
-
-        # 세션 데이터 저장
-        session["diary_content"] = diary_content_serializable
-        session["questions"] = questions_with_types
-        session["question_index"] = 0
+            {"type": question_types[idx], "question": qa["질문"], "answer": qa["답변"]}
+            for idx, qa in enumerate(qnas)
+        ]
 
         return jsonify({
             "questions": questions_with_types,
-            "current_question": questions_with_types[0]
+            "current_question": questions_with_types[0],
+            "diary_content": diary_content_serializable
         })
-
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
-    
+
 
 @app.route("/recall-session/answer", methods=["POST"])
 def process_recall_answer():
+    payload, error_response, status_code = get_jwt_payload()
+    if error_response:
+        return error_response, status_code
+
+    user_id = payload["user_id"]
+    print("Request data:", request.json)  # 요청 데이터 출력
+
     user_answer = request.json.get("user_answer", "")
-    question_index = session.get("question_index", 0)
-    questions = session.get("questions", [])
-    diary_content = session.get("diary_content", "")
+    question_index = request.json.get("question_index", 0)
+    questions = request.json.get("questions", [])  # 수정: "question" -> "questions"
+    diary_content = request.json.get("diary_content", "")
 
     if not questions or question_index >= len(questions):
         return jsonify({"error": "No more questions available."}), 400
@@ -160,9 +256,6 @@ def process_recall_answer():
         user_answer=user_answer,
         diary_content=diary_content
     )
-
-    if is_correct:
-        session["question_index"] = question_index + 1
 
     return jsonify({
         "is_correct": is_correct,
@@ -178,9 +271,11 @@ def theme_test_page():
 
 @app.route("/theme/start", methods=["GET"])
 def theme_start_conversation():
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "user_id is missing from session"}), 400
+    payload, error_response, status_code = get_jwt_payload()
+    if error_response:
+        return error_response, status_code
+
+    user_id = payload["user_id"]
 
     try:
         first_message = theme_bot.start_conversation(user_id=user_id)
@@ -190,10 +285,14 @@ def theme_start_conversation():
 
 @app.route("/theme/ask", methods=["POST"])
 def theme_ask():
+    payload, error_response, status_code = get_jwt_payload()
+    if error_response:
+        return error_response, status_code
+
+    user_id = payload["user_id"]
     user_input = request.json.get("message", "")
-    user_id = session.get("user_id")
-    if not user_input or not user_id:
-        return jsonify({"error": "Invalid input or session"}), 400
+    if not user_input:
+        return jsonify({"error": "message is required"}), 400
 
     try:
         reply = theme_bot.ask(user_input, user_id=user_id)
@@ -203,15 +302,17 @@ def theme_ask():
 
 @app.route("/theme/select", methods=["GET"])
 def theme_select():
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "user_id is missing from session"}), 400
+    payload, error_response, status_code = get_jwt_payload()
+    if error_response:
+        return error_response, status_code
+
+    user_id = payload["user_id"]
 
     try:
         selected_theme = theme_bot.select_theme(user_id=user_id)
         return jsonify({"selected_theme": selected_theme})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
+    
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
