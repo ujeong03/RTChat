@@ -46,7 +46,7 @@ class RT_Daily_Chatbot:
         """챗봇 상태 초기화"""
         self.history = []
         
-    def ask(self, user_input: str, user_id: str) -> str:
+    def ask(self, user_input: str, user_id: str) -> dict:
         self.chat_history.append({"role": "user", "content": user_input})
 
         user_profile = self._fetch_user_profile(user_id)
@@ -54,8 +54,8 @@ class RT_Daily_Chatbot:
         user_gender = user_profile.get("gender")
         user_age = user_profile.get("birth_date")
         user_age = datetime.now().year - int(user_age.split("-")[0]) if user_age else None
-        user_married = user_profile.get("married") 
-        user_family = user_profile.get("family_relationship")  # 가족 정보 
+        user_married = user_profile.get("married")
+        user_family = user_profile.get("family_relationship")  # 가족 정보
 
         profile_info = f"이름: {user_name}, 성별: {user_gender}, 나이: {user_age}, 결혼 여부: {user_married}, 가족 관계: {user_family}"
 
@@ -68,8 +68,12 @@ class RT_Daily_Chatbot:
             self.chat_history.append({"role": "assistant", "content": farewell})
 
             diary_title, diary_body = self.generate_diary()
-            self.save_diary(diary_title,diary_body,user_id)
-            return farewell + "\n\n(일기가 저장되었어요. 프로그램을 종료합니다.)"
+            diary_result = self.save_diary(diary_title, diary_body, user_id)
+
+            return {
+                "response": farewell + "\n\n(일기가 저장되었어요. 프로그램을 종료합니다.)",
+                "diary": diary_result
+            }
 
         # 키워드 추출
         keywords = self.extract_keywords(user_input)
@@ -77,7 +81,7 @@ class RT_Daily_Chatbot:
         # 키워드 통합 검색
         query = self.gpt_build_query(keywords)
 
-        results = self.db_manager.search(user_id,keywords,query)
+        results = self.db_manager.search(user_id, keywords, query)
 
         recalled_diaries = []
         for i, doc in enumerate(results):
@@ -86,37 +90,28 @@ class RT_Daily_Chatbot:
 
         # 회상 없으면 일반 대화
         try:
-            # 회상 응답 먼저 생성
             if recalled_diaries:
-                recall_reply = self.generate_emotional_recall_reply(profile_info,recalled_diaries)
-                # 💬 회상 응답을 대화 이력에 추가
+                recall_reply = self.generate_emotional_recall_reply(profile_info, recalled_diaries)
                 if not '아니오' in recall_reply:
-                  self.chat_history.append({"role": "assistant", "content": recall_reply})
-                  return recall_reply
-     
-                else:
-                    print("❗회상 응답이 문맥에 어울리지 않아 일반 대화로 전환")
+                    self.chat_history.append({"role": "assistant", "content": recall_reply})
+                    return {"response": recall_reply}
 
-            # 💬 회상할 내용이 없으면 일반 대화 응답 생성
-            prompt = self.load_prompt(self.prompt_path, profile_info=profile_info,chat_history=self.get_chat_history_as_text())
+            # 일반 대화 응답 생성
+            prompt = self.load_prompt(self.prompt_path, profile_info=profile_info, chat_history=self.get_chat_history_as_text())
             response = self.client.chat.completions.create(
                 model="gpt-4.1-mini",
-                messages=[
-                    {"role": "system", "content": prompt}
-                ],
+                messages=[{"role": "system", "content": prompt}],
                 temperature=0.7,
                 max_tokens=200
             )
             reply = response.choices[0].message.content
-            print(f"💬 챗봇 응답: {reply}")
             self.chat_history.append({"role": "assistant", "content": reply})
 
-            return reply
-            
+            return {"response": reply}
+
         except Exception as e:
             print(f"❗예외 발생: {e}")
-            return "음... 지금은 대화가 조금 어려운 것 같아요. 조금 있다가 다시 얘기해볼까요?"
-
+            return {"response": "음... 지금은 대화가 조금 어려운 것 같아요. 조금 있다가 다시 얘기해볼까요?"}
 
     def gpt_build_query(self, keywords: list[str]) -> str:
         prompt = f"다음 키워드를 기반으로 기존 일기에서 비슷한 내용이 있는지 검색할거야. FAISS 벡터 DB에서 검색할 거고, 다른 말을 덧붙이지 말고 그걸 위한 자연스러운 문장 쿼리 하나만 출력해. {', '.join(keywords)}"

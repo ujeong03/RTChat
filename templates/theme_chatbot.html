@@ -2,6 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>테마 챗봇</title>
   <style>
     body { font-family: Arial, sans-serif; background: #f4f4f9; margin: 0; }
@@ -14,6 +15,7 @@
     .input-box button:hover { background: #0056b3; }
     .user { color: #007BFF; margin: 5px 0; }
     .assistant { color: #333; margin: 5px 0; }
+    .diary { color: #ff5722; margin: 5px 0; }
   </style>
 </head>
 <body>
@@ -130,6 +132,14 @@
           assistantMessage.className = "assistant";
           assistantMessage.textContent = `🤖 ${data.response}`;
           chatBox.appendChild(assistantMessage);
+
+          // 저장된 일기 내용 표시
+          if (data.diary) {
+            const diaryMessage = document.createElement("p");
+            diaryMessage.className = "diary";
+            diaryMessage.innerHTML = `📖 저장된 일기:<br>제목: ${data.diary.title}<br>내용: ${data.diary.body}<br>테마: ${data.diary.theme}`;
+            chatBox.appendChild(diaryMessage);
+          }
         }
       } catch (error) {
         const errorMessage = document.createElement("p");

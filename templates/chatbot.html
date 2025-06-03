@@ -1,145 +1,166 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-    <meta charset="UTF-8">
-    <title>기억 회상 챗봇</title>
-    <style>
-        body {
-            font-family: sans-serif;
-            max-width: 600px;
-            margin: 50px auto;
-            background: #f7f7f7;
-            padding: 20px;
-            border-radius: 10px;
-        }
-        .chat-box {
-            border: 1px solid #ccc;
-            background: #fff;
-            padding: 10px;
-            height: 400px;
-            overflow-y: auto;
-            margin-bottom: 10px;
-        }
-        .chat-line {
-            margin-bottom: 8px;
-        }
-        .chat-line.user {
-            text-align: right;
-            color: #007BFF;
-        }
-        .chat-line.bot {
-            text-align: left;
-            color: #333;
-        }
-        input[type="text"] {
-            width: 80%;
-            padding: 10px;
-        }
-        button {
-            padding: 10px 15px;
-            margin-left: 5px;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RT 챗봇</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #f4f4f9;
+    }
+    .container {
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 20px;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    }
+    h1 {
+      text-align: center;
+      color: #333;
+    }
+    .chat-box {
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 10px;
+      height: 300px;
+      overflow-y: auto;
+      background-color: #f9f9f9;
+    }
+    .chat-box p {
+      margin: 5px 0;
+    }
+    .user {
+      color: #007bff;
+    }
+    .assistant {
+      color: #28a745;
+    }
+    .diary {
+      color: #ff5722;
+    }
+    .input-box {
+      display: flex;
+      margin-top: 10px;
+    }
+    .input-box input {
+      flex: 1;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    .input-box button {
+      padding: 10px;
+      background-color: #007bff;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .input-box button:hover {
+      background-color: #0056b3;
+    }
+  </style>
 </head>
 <body>
-    <h2>기억 회상 챗봇</h2>
-    <div class="chat-box" id="chat-box"></div>
-    <input type="text" id="message" placeholder="메시지를 입력하세요...">
-    <button onclick="sendMessage()">보내기</button>
-    <button onclick="startConversation()">대화 시작</button>
-    <audio id="tts-audio" controls style="display:none;"></audio>
+  <div class="container">
+    <h1>RT 챗봇</h1>
+    <div class="chat-box" id="chat-box">
+      <p class="assistant">🤖 안녕하세요. 오늘 하루는 어땠어요? 기억에 남는 일이 있었나요?</p>
+    </div>
+    <div class="input-box">
+      <input type="text" id="user-input" placeholder="메시지를 입력하세요...">
+      <button onclick="sendMessage()">전송</button>
+    </div>
+  </div>
 
-    <script>
-        let jwtToken = null; // JWT 토큰을 저장할 변수
+  <script>
+    let jwtToken = null; // JWT 토큰을 저장할 변수
 
-        // 페이지 로드 시 자동으로 /auth/token 호출
-        window.onload = async function() {
-            try {
-                const response = await fetch("/auth/token", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ user_id: "test_user" }) // 테스트용 user_id
-                });
-                const data = await response.json();
-                if (data.token) {
-                    jwtToken = data.token; // 토큰 저장
-                    console.log("JWT 토큰 생성 완료:", jwtToken);
-                } else {
-                    console.error("토큰 생성 실패:", data.error);
-                }
-            } catch (error) {
-                console.error("서버와 연결할 수 없습니다:", error);
-            }
-        };
+    // 페이지 로드 시 자동으로 /auth/token 호출
+    window.onload = async function() {
+      try {
+        const response = await fetch("/auth/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_id: "1" }) // 테스트용 user_id
+        });
+        const data = await response.json();
+        if (data.token) {
+          jwtToken = data.token; // 토큰 저장
+          console.log("JWT 토큰 생성 완료:", jwtToken);
+        } else {
+          console.error("토큰 생성 실패:", data.error);
+        }
+      } catch (error) {
+        console.error("서버와 연결할 수 없습니다:", error);
+      }
+    };
 
-        function appendMessage(text, sender) {
-            const chatBox = document.getElementById("chat-box");
-            const line = document.createElement("div");
-            line.className = "chat-line " + sender;
-            line.textContent = text;
-            chatBox.appendChild(line);
-            chatBox.scrollTop = chatBox.scrollHeight;
+    async function sendMessage() {
+      const userInput = document.getElementById("user-input").value;
+      const chatBox = document.getElementById("chat-box");
+
+      if (!userInput.trim()) return;
+
+      if (!jwtToken) {
+        const errorMessage = document.createElement("p");
+        errorMessage.className = "assistant";
+        errorMessage.textContent = "❌ JWT 토큰이 없습니다. 페이지를 새로고침하세요.";
+        chatBox.appendChild(errorMessage);
+        return;
+      }
+
+      // 사용자 메시지 표시
+      const userMessage = document.createElement("p");
+      userMessage.className = "user";
+      userMessage.textContent = `🙋 사용자: ${userInput}`;
+      chatBox.appendChild(userMessage);
+
+      // 입력 필드 초기화
+      document.getElementById("user-input").value = "";
+
+      try {
+        // 챗봇 API 호출
+        const response = await fetch("/ask", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${jwtToken}` // JWT 토큰 포함
+          },
+          body: JSON.stringify({ message: userInput })
+        });
+
+        const data = await response.json();
+
+        // 챗봇 응답 표시
+        const assistantMessage = document.createElement("p");
+        assistantMessage.className = "assistant";
+        assistantMessage.textContent = `🤖 챗봇: ${data.response}`;
+        chatBox.appendChild(assistantMessage);
+
+        // 저장된 일기 내용 표시
+        if (data.diary) {
+          const diaryMessage = document.createElement("p");
+          diaryMessage.className = "diary";
+          diaryMessage.innerHTML = `📖 저장된 일기:<br>제목: ${data.diary.title}<br>내용: ${data.diary.body}`;
+          chatBox.appendChild(diaryMessage);
         }
 
-        async function startConversation() {
-            if (!jwtToken) {
-                console.error("JWT 토큰이 없습니다. 페이지를 새로고침하세요.");
-                return;
-            }
-
-            const res = await fetch("/start", {
-                method: "GET",
-                headers: {
-                    "Authorization": `Bearer ${jwtToken}` // JWT 토큰 포함
-                }
-            });
-            const data = await res.json();
-            appendMessage(data.response, "bot");
-            playTTS(data.response);
-        }
-
-        async function sendMessage() {
-            const messageInput = document.getElementById("message");
-            const message = messageInput.value.trim();
-            if (!message) return;
-
-            appendMessage(message, "user");
-            messageInput.value = "";
-
-            const res = await fetch("/ask", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${jwtToken}` // JWT 토큰 포함
-                },
-                body: JSON.stringify({ message: message })
-            });
-
-            const data = await res.json();
-            if (data.response) {
-                appendMessage(data.response, "bot");
-                playTTS(data.response);
-            }
-        }
-
-        async function playTTS(text) {
-            const res = await fetch("/tts", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${jwtToken}` // JWT 토큰 포함
-                },
-                body: JSON.stringify({ text: text })
-            });
-
-            const data = await res.json();
-            if (data.audio_url) {
-                const audio = document.getElementById("tts-audio");
-                audio.src = data.audio_url;
-                audio.style.display = "block";
-                audio.play();
-            }
-        }
-    </script>
+        // 채팅 박스 스크롤 하단으로 이동
+        chatBox.scrollTop = chatBox.scrollHeight;
+      } catch (error) {
+        console.error("Error:", error);
+        const errorMessage = document.createElement("p");
+        errorMessage.className = "assistant";
+        errorMessage.textContent = "🤖 챗봇: 문제가 발생했습니다. 다시 시도해주세요.";
+        chatBox.appendChild(errorMessage);
+      }
+    }
+  </script>
 </body>
 </html>

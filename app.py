@@ -116,17 +116,18 @@ def ask():
     payload, error_response, status_code = get_jwt_payload()
     if error_response:
         return error_response, status_code
-    
-    print("Request data:", payload)  # 요청 데이터 출력
 
     user_id = payload["user_id"]
     user_input = request.json.get("message", "")
     if not user_input:
         return jsonify({"error": "message is required"}), 400
 
-    reply = daily_bot.ask(user_input, user_id=user_id)
-    return jsonify({"response": reply})
-
+    try:
+        result = daily_bot.ask(user_input, user_id=user_id)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
 # tts
 @app.route("/tts", methods=["POST"])
 def generate_tts():
@@ -303,11 +304,11 @@ def theme_ask():
         return jsonify({"error": "message is required"}), 400
 
     try:
-        reply = theme_bot.ask(user_input, user_id=user_id)
-        return jsonify({"response": reply})
+        result = theme_bot.ask(user_input, user_id=user_id)
+        return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
+    
 @app.route("/theme/select", methods=["GET"])
 def theme_select():
     payload, error_response, status_code = get_jwt_payload()
