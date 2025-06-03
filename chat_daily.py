@@ -49,6 +49,16 @@ class RT_Daily_Chatbot:
     def ask(self, user_input: str, user_id: str) -> str:
         self.chat_history.append({"role": "user", "content": user_input})
 
+        user_profile = self._fetch_user_profile(user_id)
+        user_name = user_profile.get("name")
+        user_gender = user_profile.get("gender")
+        user_age = user_profile.get("birth_date")
+        user_age = datetime.now().year - int(user_age.split("-")[0]) if user_age else None
+        user_married = user_profile.get("married") 
+        user_family = user_profile.get("family_relationship")  # 가족 정보 
+
+        profile_info = f"이름: {user_name}, 성별: {user_gender}, 나이: {user_age}, 결혼 여부: {user_married}, 가족 관계: {user_family}"
+
         # ✅ 대화 종료 여부 판단 후 일기 저장
         if self.is_conversation_ending():
             self.chat_history.append({"role": "user", "content": "대화를 종료합니다."})
@@ -78,8 +88,7 @@ class RT_Daily_Chatbot:
         try:
             # 회상 응답 먼저 생성
             if recalled_diaries:
-                recall_reply = self.generate_emotional_recall_reply(recalled_diaries)
-
+                recall_reply = self.generate_emotional_recall_reply(profile_info,recalled_diaries)
                 # 💬 회상 응답을 대화 이력에 추가
                 if not '아니오' in recall_reply:
                   self.chat_history.append({"role": "assistant", "content": recall_reply})
@@ -89,13 +98,17 @@ class RT_Daily_Chatbot:
                     print("❗회상 응답이 문맥에 어울리지 않아 일반 대화로 전환")
 
             # 💬 회상할 내용이 없으면 일반 대화 응답 생성
+            prompt = self.load_prompt(self.prompt_path, profile_info=profile_info,chat_history=self.get_chat_history_as_text())
             response = self.client.chat.completions.create(
                 model="gpt-4.1-mini",
-                messages=self.chat_history,
+                messages=[
+                    {"role": "system", "content": prompt}
+                ],
                 temperature=0.7,
                 max_tokens=200
             )
             reply = response.choices[0].message.content
+            print(f"💬 챗봇 응답: {reply}")
             self.chat_history.append({"role": "assistant", "content": reply})
 
             return reply
@@ -140,7 +153,7 @@ class RT_Daily_Chatbot:
     
     
     # 회상된 일기 내용으로 감정 회상 응답 생성하기
-    def generate_emotional_recall_reply(self, recalled_diaries: List[Tuple[str, Document]]) -> str:
+    def generate_emotional_recall_reply(self,profile_info: str, recalled_diaries: List[Tuple[str, Document]]) -> str:
         try:
             # 전체 일기 내용을 하나로 합치기
             combined_diary_content = "\n\n".join(
@@ -150,6 +163,7 @@ class RT_Daily_Chatbot:
             # 프롬프트 로딩 및 포맷팅
             prompt = self.load_prompt(
                 "./prompt/recall_prompt_test3.txt",
+                profile_info = profile_info,
                 chat_history=self.get_chat_history_as_text(),
                 diary_content=combined_diary_content
             )
@@ -275,7 +289,6 @@ class RT_Daily_Chatbot:
 
         # JSON 형식으로 반환
         return {
-            "date": today,
             "title": title,
             "body": body
         }

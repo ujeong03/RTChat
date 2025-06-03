@@ -2,7 +2,8 @@ import traceback
 import openai
 from datetime import datetime
 import os
-from dotenv import load_dotenv, find_dotenv
+from dotenv import load_dotenv
+import requests
 from diary_db_management import DiaryDBManager
 from typing import List, Tuple
 from langchain_core.documents import Document
@@ -19,6 +20,20 @@ class RT_Theme_Chatbot:
         self.client = openai.OpenAI(api_key=openai.api_key)
         self.chat_history = []
         self.db_manager = DiaryDBManager(persist_path="vectorstore/diary_faiss")
+
+    def _fetch_user_profile(self, user_id: str) -> dict:
+        """
+        Django API (https://nabiya.site/api/users/get_user_info/?user_id=…)
+        엔드포인트를 호출해서 JSON 응답을 dict로 반환합니다.
+        """
+        try:
+            url = f"https://nabiya.site/api/users/get_user_info/?user_id={user_id}"
+            resp = requests.get(url, timeout=5)
+            resp.raise_for_status()
+            return resp.json()  # e.g. {"user_id":"1","name":"김철수","gender":"남성", ...}
+        except Exception as e:
+            print(f"[프로필 조회 실패] user_id={user_id} / error={e}")
+            return {}
 
     def _load_prompt(self, path: str) -> str:
         with open(path, "r", encoding="utf-8") as f:
@@ -38,10 +53,22 @@ class RT_Theme_Chatbot:
                     themes.append(theme.strip())
 
             theme_count = Counter(themes)
+
+            user_profile = self._fetch_user_profile(user_id)
+            user_name = user_profile.get("name")
+            user_gender = user_profile.get("gender")
+            user_age = user_profile.get("birth_date")
+            user_age = datetime.now().year - int(user_age.split("-")[0]) if user_age else None
+            user_married = user_profile.get("married") 
+            user_family = user_profile.get("family_relationship")  # 가족 정보 
+
+            profile_info = f"이름: {user_name}, 성별: {user_gender}, 나이: {user_age}, 결혼 여부: {user_married}, 가족 관계: {user_family}"
+
     
             theme_count_str = "\n".join([f"{k}: {v}" for k, v in theme_count.items()])
             prompt = self.load_prompt(
                 "./prompt/theme_prompt_test2.txt",
+                profile_info=profile_info,
                 theme_count=theme_count_str
             )
        
@@ -80,6 +107,7 @@ class RT_Theme_Chatbot:
 
             prompt = self.load_prompt(
                 f"./prompt/theme_prompt_{selected_theme_num}_{theme_name}.txt",
+
             )
             response = self.client.chat.completions.create(
                 model="gpt-4.1-mini" 
@@ -152,10 +180,14 @@ class RT_Theme_Chatbot:
                 else:
                     print("❗회상 응답이 문맥에 어울리지 않아 일반 대화로 전환")
 
+
             # 💬 회상할 내용이 없으면 일반 대화 응답 생성
+            prompt = self.load_prompt(self.prompt_path, chat_history=self.get_chat_history_as_text())
             response = self.client.chat.completions.create(
                 model="gpt-4.1-mini",
-                messages=self.chat_history,
+                messages=[
+                    {"role": "system", "content": prompt}
+                ],
                 temperature=0.7,
                 max_tokens=200
             )
@@ -319,16 +351,6 @@ class RT_Theme_Chatbot:
     # 일기 저장
     def save_diary(self, title: str, body: str, theme:str,user_id: str):
         today = datetime.now().strftime("%Y-%m-%d")
-        save_dir = "./diary/theme_diaries"
-        os.makedirs(save_dir, exist_ok=True)
-
-        # 제목을 파일명으로 사용하되, 파일명에 적합하도록 정리
-        safe_title = self.sanitize_filename(title)
-        file_name = f"diary_{today}_{safe_title}.txt"
-        file_path = os.path.join(save_dir, file_name)
-
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(f"제목: {title}\n\n{body}")
 
         # 벡터 DB 업데이트
         self.db_manager.create_or_update_index(
@@ -340,6 +362,12 @@ class RT_Theme_Chatbot:
                 "theme" : theme                            
             }]
         )
+
+        # JSON 형식으로 반환
+        return {
+            "title": title,
+            "body": body
+        }
 
 
 if __name__ == "__main__":

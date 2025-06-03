@@ -64,11 +64,17 @@ def verify_jwt(token):
     except jwt.InvalidTokenError:
         return None  # 토큰이 유효하지 않음
     
-
-
 app = Flask(__name__)
-CORS(app, supports_credentials=True)
-app.secret_key = "1234567890abcdef"
+CORS(app,
+     supports_credentials=True,
+     origins=[
+         "http://localhost:5174",
+         "https://localhost:5174",
+         "https://nabiya.site"
+     ])
+
+
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "default_secret_key")  # 기본값 설정 가능
 
 # 챗봇 객체
 daily_bot = RT_Daily_Chatbot()
@@ -110,6 +116,8 @@ def ask():
     payload, error_response, status_code = get_jwt_payload()
     if error_response:
         return error_response, status_code
+    
+    print("Request data:", payload)  # 요청 데이터 출력
 
     user_id = payload["user_id"]
     user_input = request.json.get("message", "")
