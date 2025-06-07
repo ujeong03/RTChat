@@ -10,11 +10,14 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from flask_cors import CORS
 import jwt
+from diary_db_management import DiaryDBManager
+
 
 # 환경 변수 로드
 _ = load_dotenv(find_dotenv())
 openai.api_key = os.getenv("OPENAI_API_KEY")
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+global_db_manager = DiaryDBManager(persist_path="vectorstore/diary_faiss")
 
 # JWT 설정
 JWT_SECRET = os.getenv("JWT_SECRET_KEY", "your_jwt_secret_key")  # 환경 변수에서 로드하거나 기본값 설정
@@ -76,10 +79,10 @@ CORS(app,
 
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "default_secret_key")  # 기본값 설정 가능
 
-# 챗봇 객체
-daily_bot = RT_Daily_Chatbot()
-recall_session = RT_ChatRecallSession()
-theme_bot = RT_Theme_Chatbot()
+# 챗봇 객체 생성 시 전역 DB 매니저를 전달
+daily_bot = RT_Daily_Chatbot(db_manager=global_db_manager)
+recall_session = RT_ChatRecallSession(db_manager=global_db_manager)
+theme_bot = RT_Theme_Chatbot(db_manager=global_db_manager)
 
 # 구글 TTS, STT 클라이언트
 tts_client = texttospeech.TextToSpeechClient()
@@ -94,18 +97,17 @@ def get_token():
     token = generate_jwt(user_id)
     return jsonify({"token": token})
 
-
 @app.route("/")
 def index():
     return render_template("chatbot.html")
 
 @app.route("/start", methods=["GET"])
 def start_conversation():
-    payload, error_response, status_code = get_jwt_payload()
-    if error_response:
-        return error_response, status_code
+    # payload, error_response, status_code = get_jwt_payload()
+    # if error_response:
+    #     return error_response, status_code
 
-    user_id = payload["user_id"]
+    # user_id = payload["user_id"]
 
     daily_bot.reset()
     first_message = daily_bot.start_conversation()
@@ -118,6 +120,7 @@ def ask():
         return error_response, status_code
 
     user_id = payload["user_id"]
+    print(user_id)
     user_input = request.json.get("message", "")
     if not user_input:
         return jsonify({"error": "message is required"}), 400
@@ -131,11 +134,12 @@ def ask():
 # tts
 @app.route("/tts", methods=["POST"])
 def generate_tts():
-    payload, error_response, status_code = get_jwt_payload()
-    if error_response:
-        return error_response, status_code
+    # payload, error_response, status_code = get_jwt_payload()
+    # if error_response:
+    #     return error_response, status_code
 
-    user_id = payload["user_id"]
+    # print(payload)
+    # user_id = payload["user_id"]
     text = request.json.get("text", "")
     if not text:
         return jsonify({"error": "text is required"}), 400
@@ -252,7 +256,7 @@ def process_recall_answer():
 
     user_answer = request.json.get("user_answer", "")
     question_index = request.json.get("question_index", 0)
-    questions = request.json.get("questions", [])  # 수정: "question" -> "questions"
+    questions = request.json.get("question", [])  # 수정: "question" -> "questions"
     diary_content = request.json.get("diary_content", "")
 
     if not questions or question_index >= len(questions):
@@ -265,6 +269,7 @@ def process_recall_answer():
         user_answer=user_answer,
         diary_content=diary_content
     )
+    
 
     return jsonify({
         "is_correct": is_correct,
@@ -309,19 +314,6 @@ def theme_ask():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     
-@app.route("/theme/select", methods=["GET"])
-def theme_select():
-    payload, error_response, status_code = get_jwt_payload()
-    if error_response:
-        return error_response, status_code
 
-    user_id = payload["user_id"]
-
-    try:
-        selected_theme = theme_bot.select_theme(user_id=user_id)
-        return jsonify({"selected_theme": selected_theme})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)

@@ -8,35 +8,41 @@ from diary_db_management import DiaryDBManager
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
+# 모듈 레벨 상수로 정의
+QUIZ_PROMPT_PATH = "./prompt/recall_sess_quiz_gen_prompt_3.txt"
+ASSISTANT_SYSTEM_PATH = "./prompt/recall_sess_assistant_prompt_2.txt"
+EVALUATION_SYSTEM_PATH = "./prompt/recall_sess_evaluation_system.txt"
+
 class RT_ChatRecallSession:
-    def __init__(self):
-        self.quiz_prompt_path = "./prompt/recall_sess_quiz_gen_prompt_3.txt"
-        self.assist_prompt_path = "./prompt/recall_sess_assistant_prompt_3.txt"
-        self.db_manager = DiaryDBManager(persist_path="vectorstore/diary_faiss")  # 가정: DiaryDBManager 클래스가 정의되어 있음
+    def __init__(self, db_manager: DiaryDBManager = None):
+        self.db_manager = db_manager if db_manager else DiaryDBManager()
         self.chat_history = []  # 대화 기록 저장용
         self.client = openai.OpenAI(api_key=openai.api_key)
 
     def load_prompt(self, path: str, **kwargs) -> str:
-        with open(path, "r", encoding="utf-8") as f:
-            template = f.read()
-        return template.format(**kwargs)
+        """프롬프트 파일을 로드하고 필요시 형식을 지정합니다."""
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                template = f.read()
+            return template.format(**kwargs) if kwargs else template
+        except FileNotFoundError:
+            print(f"[프롬프트 파일 없음] {path}")
+            return ""
     
     def get_diary_content(self, date: str, user_id: str):
-        """ 최근 일주일의 일기 작성 가져오기"""
-        diary = self.db_manager.get_diary_7days_by_date(user_id,date)
+        """최근 일주일의 일기 작성 가져오기"""
+        diary = self.db_manager.get_diary_7days_by_date(user_id, date)
         if diary:
             return diary
         else:
             raise ValueError(f"해당 날짜의 일기가 없습니다: {date}")
 
-
     # 일기 내용 기반으로 회상 질문 생성하기
-
     def generate_recall_questions(self, user_id: str):  
         today = datetime.today().strftime("%Y-%m-%d")
         diary_contents = self.get_diary_content(today, user_id)
 
-        prompt = self.load_prompt(self.quiz_prompt_path, date=today, diary_content=diary_contents)
+        prompt = self.load_prompt(QUIZ_PROMPT_PATH, date=today, diary_content=diary_contents)
         response = self.client.chat.completions.create(
             model="gpt-4.1-mini",
             messages=[{"role": "system", "content": prompt}],
@@ -56,25 +62,12 @@ class RT_ChatRecallSession:
             return []  # 빈 리스트 반환하여 이후 코드에서 예외 처리 가능하게
 
     def evaluate_user_answer(self, recall_question, recall_answer, user_answer, diary_content):
-        system_instruction = """
-            당신은 심리 회상 퀴즈 전문가입니다.
-            사용자의 답변이 의미적으로 정답(70% 이상 의미 유사)이라면 '정답'이라고 판단하고 수치화한 후,
-            공감 어린 피드백을 제공합니다.
-
-            틀렸다고 판단되면 '힌트'를 주되, 정답을 직접 말하지 말고, 일기 내용을 바탕으로 간접적인 묘사나 단서만 줍니다.
-
-            반드시 아래 JSON 형식으로 출력하세요:
-
-                {{
-                "status": "정답" 또는 "힌트",
-                "score": 0.0,  # 의미 유사도 점수 (0.0 ~ 100.0)
-                "feedback": "공감 피드백 또는 유도 질문",
-                "hint": "힌트 텍스트 (정답이면 빈 문자열)"
-                }}
-        """
-        # 프롬프트 로드
+        # 시스템 명령어 프롬프트 로드
+        # system_instruction = self.load_prompt(ASSSISTANT_SYSTEM_PATH)
+        
+        # 사용자 평가 프롬프트 로드
         prompt = self.load_prompt(
-            self.assist_prompt_path,
+            EVALUATION_SYSTEM_PATH,
             recall_question=recall_question,
             recall_answer=recall_answer,
             user_answer=user_answer,
@@ -84,8 +77,8 @@ class RT_ChatRecallSession:
         response = self.client.chat.completions.create(
             model="gpt-4",
             messages=[
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": prompt}
+                # {"role": "system", "content": system_instruction},
+                {"role": "system", "content": prompt}
             ],
             temperature=0.5,
         )
@@ -98,7 +91,7 @@ class RT_ChatRecallSession:
         except Exception as e:
             print("❌ JSON 파싱 실패:", e)
             print("📝 원본 응답:", content)
-            return False, content, ""
+            return False, content, "", 0.0
             
     def run_session(self, diary_content: str, user_id: str):
         qnas = self.generate_recall_questions(user_id)
@@ -114,7 +107,7 @@ class RT_ChatRecallSession:
             while not is_correct and attempts < 5:  # 최대 5회까지 유도
                 user_answer = input("👉 당신의 답변: ")
                 self.chat_history.append({"role": "user", "content": user_answer})
-                is_correct, feedback, hint,score = self.evaluate_user_answer(
+                is_correct, feedback, hint, score = self.evaluate_user_answer(
                     qa["질문"], qa["답변"], user_answer, diary_content
                 )
 

@@ -36,7 +36,7 @@
         const response = await fetch("/auth/token", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: "test_user" }) // 테스트용 user_id
+          body: JSON.stringify({ user_id: "1" }) // 테스트용 user_id
         });
         const data = await response.json();
         if (data.token) {

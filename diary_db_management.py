@@ -8,18 +8,33 @@ import openai
 
 
 class DiaryDBManager:
-
     def __init__(self, persist_path="vectorstore/diary_faiss"):
         self.persist_path = persist_path
         self.embedding = OpenAIEmbeddings(
-                            model="text-embedding-3-small",
-                            openai_api_key=os.getenv("OPENAI_API_KEY")
-                        )
+            model="text-embedding-3-small",
+            openai_api_key=os.getenv("OPENAI_API_KEY")
+        )
         self.client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+        # FAISS 데이터베이스 로드 또는 초기화
         if os.path.exists(persist_path):
-            self.vectordb = FAISS.load_local(persist_path, self.embedding, allow_dangerous_deserialization=True)
+            try:
+                self.vectordb = FAISS.load_local(persist_path, self.embedding, allow_dangerous_deserialization=True)
+                print(f"[FAISS 로드 완료] '{persist_path}'에서 데이터베이스를 로드했습니다.")
+            except Exception as e:
+                print(f"[FAISS 로드 실패] {e}. 새로 생성합니다.")
+                self._initialize_faiss_database()
         else:
-            self.vectordb = None
+            print(f"[FAISS 초기화] '{persist_path}' 경로가 없습니다. 새로 생성합니다.")
+            os.makedirs(persist_path, exist_ok=True)
+            self._initialize_faiss_database()
+
+    def _initialize_faiss_database(self):
+        # 기본 텍스트를 사용하여 FAISS 데이터베이스 생성
+        default_texts = ["기본 텍스트입니다. 데이터베이스를 초기화합니다."]
+        self.vectordb = FAISS.from_texts(default_texts, self.embedding)
+        self.vectordb.save_local(self.persist_path)
+        print(f"[FAISS 저장 완료] '{self.persist_path}'에 새 데이터베이스를 생성했습니다.")
 
     def create_or_update_index(self, user_id: str, diary_texts: list[str], metadata_list: list[dict]):
         docs = []
