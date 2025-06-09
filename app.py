@@ -73,7 +73,8 @@ CORS(app,
      origins=[
          "http://localhost:5174",
          "https://localhost:5174",
-         "https://nabiya.site"
+         "https://nabiya.site",
+         "https://ddukddak-fe.vercel.app",
      ])
 
 
@@ -96,10 +97,6 @@ def get_token():
 
     token = generate_jwt(user_id)
     return jsonify({"token": token})
-
-@app.route("/")
-def index():
-    return render_template("chatbot.html")
 
 @app.route("/start", methods=["GET"])
 def start_conversation():
@@ -159,26 +156,7 @@ def generate_tts():
 
     return jsonify({"audio_url": "/" + filename, "filename": filename})
 
-# tts 재생 후 삭제
-@app.route("/tts/delete", methods=["POST"])
-def delete_tts():
-    payload, error_response, status_code = get_jwt_payload()
-    if error_response:
-        return error_response, status_code
 
-    user_id = payload["user_id"]
-    filename = request.json.get("filename", "")
-    if not filename:
-        return jsonify({"error": "filename is required"}), 400
-
-    try:
-        os.remove(filename)
-        return jsonify({"message": "File deleted successfully"})
-    except FileNotFoundError:
-        return jsonify({"error": "File not found"}), 404
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    
 @app.route("/stt", methods=["POST"])
 def stt():
     payload, error_response, status_code = get_jwt_payload()
@@ -200,7 +178,6 @@ def stt():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     
-
 @app.route("/recall-session/test", methods=["GET"])
 def recall_test_page():
     return render_template("recall_chatbot.html")
@@ -237,13 +214,14 @@ def start_recall_session():
         return jsonify({
             "questions": questions_with_types,
             "current_question": questions_with_types[0],
-            "diary_content": diary_content_serializable
+            "diary_content": diary_content_serializable,
+            "question_index":       0,          # 현재 인덱스
+            "attempt":              1           # 시도 횟수 초기값
         })
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
-
 
 @app.route("/recall-session/answer", methods=["POST"])
 def process_recall_answer():
@@ -256,8 +234,9 @@ def process_recall_answer():
 
     user_answer = request.json.get("user_answer", "")
     question_index = request.json.get("question_index", 0)
-    questions = request.json.get("question", [])  # 수정: "question" -> "questions"
+    questions = request.json.get("questions", []) 
     diary_content = request.json.get("diary_content", "")
+    attempt = request.json.get("attempt", 1)   # ← 여기를 추가
 
     if not questions or question_index >= len(questions):
         return jsonify({"error": "No more questions available."}), 400
@@ -269,19 +248,47 @@ def process_recall_answer():
         user_answer=user_answer,
         diary_content=diary_content
     )
-    
 
-    return jsonify({
-        "is_correct": is_correct,
-        "feedback": feedback,
-        "hint": hint,
-        "score": score,
-        "next_question": questions[question_index + 1] if question_index + 1 < len(questions) else None
-    })
 
-@app.route("/theme/test", methods=["GET"])
-def theme_test_page():
-    return render_template("theme_chatbot.html")
+    # 기본 응답 구조
+    resp = {
+        "is_correct":    is_correct,
+        "feedback":      feedback,
+        "hint":          hint or "",
+        "score":         score,
+    }
+
+    if is_correct:
+        # → 정답: 다음 문제, attempt 리셋
+        next_idx = question_index + 1
+        resp.update({
+            "next_question": questions[next_idx] if next_idx < len(questions) else None,
+            "question_index": next_idx,
+            "attempt":       1,
+            "message":       ""
+        })
+
+    else:
+        # → 오답
+        if attempt < 3:
+            # 3회 미만: 같은 문제, attempt++
+            resp.update({
+                "next_question": questions[question_index],
+                "question_index": question_index,
+                "attempt":       attempt + 1,
+                "message":       ""
+            })
+        else:
+            # 3회째 오답: 다음 문제, attempt 리셋
+            next_idx = question_index + 1
+            resp.update({
+                "next_question": questions[next_idx] if next_idx < len(questions) else None,
+                "question_index": next_idx,
+                "attempt":       1,
+                "message":       "세 번 모두 틀리셨어요. 다음 문항으로 넘어갑니다."
+            })
+
+    return jsonify(resp)
 
 @app.route("/theme/start", methods=["GET"])
 def theme_start_conversation():
@@ -292,6 +299,7 @@ def theme_start_conversation():
     user_id = payload["user_id"]
 
     try:
+        theme_bot.reset()
         first_message = theme_bot.start_conversation(user_id=user_id)
         return jsonify({"response": first_message})
     except Exception as e:
@@ -314,6 +322,6 @@ def theme_ask():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     
-
+    
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)

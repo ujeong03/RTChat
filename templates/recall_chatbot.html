@@ -11,6 +11,9 @@
     .chat-box p { margin: 5px 0; }
     .user { color: #007bff; }
     .assistant { color: #28a745; }
+    .hint { color: #ff9800; font-style: italic; }
+    .error { color: #dc3545; }
+    .success { color: #28a745; font-weight: bold; }
     .input-box { display: flex; margin-top: 10px; }
     .input-box input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
     .input-box button { padding: 10px; background: #007bff; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
@@ -18,6 +21,7 @@
     .start-session { text-align: center; margin-bottom: 20px; }
     .start-session button { padding: 10px 20px; background: #28a745; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
     .start-session button:hover { background: #218838; }
+    .attempts { text-align: right; font-size: 0.8em; color: #666; margin-top: 5px; }
   </style>
 </head>
 <body>
@@ -27,8 +31,9 @@
       <button onclick="startRecallSession()">회상 세션 시작</button>
     </div>
     <div class="chat-box" id="chat-box"></div>
+    <div class="attempts" id="attempts"></div>
     <div class="input-box">
-      <input type="text" id="user-input" placeholder="질문에 답변하세요...">
+      <input type="text" id="user-input" placeholder="질문에 답변하세요..." onkeypress="handleKeyPress(event)">
       <button onclick="sendAnswer()">답변 제출</button>
     </div>
   </div>
@@ -37,6 +42,7 @@
     let questions = []; // 서버에서 받은 질문 배열
     let questionIndex = 0; // 현재 질문 인덱스
     let diaryContent = ""; // 서버에서 받은 일기 내용
+    let currentAttempt = 1; // 현재 시도 횟수 (1부터 시작)
 
     // 페이지 로드 시 자동으로 /auth/token 호출
     window.onload = async function() {
@@ -58,13 +64,30 @@
       }
     };
 
+    // Enter 키로 답변 제출
+    function handleKeyPress(event) {
+      if (event.key === "Enter") {
+        sendAnswer();
+      }
+    }
+
+    // 시도 횟수 표시 업데이트
+    function updateAttemptCounter() {
+      const attemptsDiv = document.getElementById("attempts");
+      attemptsDiv.textContent = `시도 횟수: ${currentAttempt}/3`;
+    }
+
     async function startRecallSession() {
       const chatBox = document.getElementById("chat-box");
       chatBox.innerHTML = ""; // 기존 대화 초기화
+      
+      // 시도 횟수 초기화
+      currentAttempt = 1;
+      updateAttemptCounter();
 
       if (!jwtToken) {
         const errorMessage = document.createElement("p");
-        errorMessage.className = "assistant";
+        errorMessage.className = "error";
         errorMessage.textContent = "❌ JWT 토큰이 없습니다. 페이지를 새로고침하세요.";
         chatBox.appendChild(errorMessage);
         return;
@@ -85,13 +108,15 @@
 
         if (data.error) {
           const errorMessage = document.createElement("p");
-          errorMessage.className = "assistant";
+          errorMessage.className = "error";
           errorMessage.textContent = `❌ 오류: ${data.error}`;
           chatBox.appendChild(errorMessage);
         } else {
           questions = data.questions; // 질문 배열 저장
           diaryContent = data.diary_content; // 일기 내용 저장
-          questionIndex = 0; // 질문 인덱스 초기화
+          questionIndex = data.question_index || 0; // 질문 인덱스 초기화
+          currentAttempt = data.attempt || 1; // 시도 횟수 초기화
+          updateAttemptCounter();
 
           const assistantMessage = document.createElement("p");
           assistantMessage.className = "assistant";
@@ -100,7 +125,7 @@
         }
       } catch (error) {
         const errorMessage = document.createElement("p");
-        errorMessage.className = "assistant";
+        errorMessage.className = "error";
         errorMessage.textContent = "❌ 서버와 연결할 수 없습니다. 다시 시도해주세요.";
         chatBox.appendChild(errorMessage);
       }
@@ -113,7 +138,7 @@
 
       if (!jwtToken) {
         const errorMessage = document.createElement("p");
-        errorMessage.className = "assistant";
+        errorMessage.className = "error";
         errorMessage.textContent = "❌ JWT 토큰이 없습니다. 페이지를 새로고침하세요.";
         chatBox.appendChild(errorMessage);
         return;
@@ -136,39 +161,69 @@
           body: JSON.stringify({
             user_answer: userInput,
             question_index: questionIndex,
-            question: questions,
-            diary_content: diaryContent
+            questions: questions,
+            diary_content: diaryContent,
+            attempt: currentAttempt // 현재 시도 횟수 전달
           })
         });
         const data = await response.json();
 
         if (data.error) {
           const errorMessage = document.createElement("p");
-          errorMessage.className = "assistant";
+          errorMessage.className = "error";
           errorMessage.textContent = `❌ 오류: ${data.error}`;
           chatBox.appendChild(errorMessage);
         } else {
-          const assistantMessage = document.createElement("p");
-          assistantMessage.className = "assistant";
-          assistantMessage.innerHTML = `🤖 피드백: ${data.feedback}<br>📊 점수: ${data.score}`;
-          chatBox.appendChild(assistantMessage);
+          // 피드백 메시지 표시
+          const feedbackMessage = document.createElement("p");
+          feedbackMessage.className = data.is_correct ? "success" : "assistant";
+          feedbackMessage.innerHTML = `🤖 ${data.is_correct ? "✅ 정답입니다!" : "❌ 오답입니다."}<br>${data.feedback}<br>📊 점수: ${data.score}`;
+          chatBox.appendChild(feedbackMessage);
 
+          // 힌트 표시 (있는 경우)
+          if (data.hint && !data.is_correct) {
+            const hintMessage = document.createElement("p");
+            hintMessage.className = "hint";
+            hintMessage.textContent = `💡 힌트: ${data.hint}`;
+            chatBox.appendChild(hintMessage);
+          }
+
+          // 메시지 표시 (있는 경우)
+          if (data.message) {
+            const messageElement = document.createElement("p");
+            messageElement.className = "assistant";
+            messageElement.textContent = data.message;
+            chatBox.appendChild(messageElement);
+          }
+
+          // 다음 질문으로 이동하거나 세션 종료
           if (data.next_question) {
-            questionIndex++; // 다음 질문으로 이동
+            questionIndex = data.question_index; // 서버에서 받은 인덱스로 업데이트
+            currentAttempt = data.attempt; // 서버에서 받은 시도 횟수로 업데이트
+            updateAttemptCounter();
+
+            // 다음 질문 표시
             const nextQuestion = document.createElement("p");
             nextQuestion.className = "assistant";
             nextQuestion.innerHTML = `🧩 질문 유형: ${data.next_question.type}<br>🤖 질문: ${data.next_question.question}`;
             chatBox.appendChild(nextQuestion);
           } else {
+            // 모든 질문 완료
             const endMessage = document.createElement("p");
-            endMessage.className = "assistant";
+            endMessage.className = "success";
             endMessage.textContent = "✅ 모든 질문이 완료되었습니다!";
             chatBox.appendChild(endMessage);
+            
+            // 시도 횟수 표시 숨기기
+            document.getElementById("attempts").textContent = "";
           }
+          
+          // 스크롤을 가장 아래로 이동
+          chatBox.scrollTop = chatBox.scrollHeight;
         }
       } catch (error) {
         const errorMessage = document.createElement("p");
-        errorMessage.className = "assistant";
+        errorMessage.className = "error";
         errorMessage.textContent = "❌ 서버와 연결할 수 없습니다. 다시 시도해주세요.";
         chatBox.appendChild(errorMessage);
       }
